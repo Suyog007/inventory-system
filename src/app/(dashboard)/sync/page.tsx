@@ -4,7 +4,10 @@ import RefreshButton from "./refresh-button";
 
 export default async function SyncPage() {
   const connections = await db.channelConnection.findMany({
-    where: { deletedAt: null },
+    where: {
+      deletedAt: null,
+      NOT: { shopDomain: { startsWith: "test-" } },
+    },
     orderBy: { installedAt: "asc" },
   });
 

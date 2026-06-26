@@ -30,7 +30,10 @@ export default async function DashboardPage() {
     `,
     db.listing.count({ where: { deletedAt: null, status: "ACTIVE" } }),
     db.channelConnection.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        NOT: { shopDomain: { startsWith: "test-" } },
+      },
       select: { channel: true, shopDomain: true, lastWebhookAt: true },
     }),
     db.syncRun.findMany({
