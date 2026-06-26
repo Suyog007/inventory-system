@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: inventory-ags-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inventory_ags
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: inventory_ags
+    ports:
+      - "5433:5432"  # 5432 is taken by local Postgres; use 5433 on host
+    volumes:
+      - ./docker-data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_ags -d inventory_ags"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
