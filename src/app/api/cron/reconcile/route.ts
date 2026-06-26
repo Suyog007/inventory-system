@@ -10,8 +10,9 @@ import { db } from "@/lib/db";
 import { importFromChannel } from "@/lib/sync/import";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Pro tier; Hobby tops out at 10s
 
-export async function POST() {
+async function handler() {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
     return NextResponse.json(
@@ -67,3 +68,7 @@ export async function POST() {
 
   return NextResponse.json({ ok: true, results });
 }
+
+// Vercel Cron uses GET; allow POST too for manual / curl triggering.
+export const GET = handler;
+export const POST = handler;
