@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/process-outbox",
-      "schedule": "* * * * *"
+      "schedule": "0 5 * * *"
     },
     {
       "path": "/api/cron/reconcile",
