@@ -19,6 +19,24 @@ export const SHOP_CONFIG_QUERY = /* GraphQL */ `
   }
 `;
 
+// Returns all webhook subscriptions configured on the shop. Used to find
+// stale registrations (e.g. pointing at an old tunnel URL) before re-creating.
+export const WEBHOOK_SUBSCRIPTIONS_QUERY = /* GraphQL */ `
+  query WebhookSubscriptions {
+    webhookSubscriptions(first: 50) {
+      nodes {
+        id
+        topic
+        endpoint {
+          ... on WebhookHttpEndpoint {
+            callbackUrl
+          }
+        }
+      }
+    }
+  }
+`;
+
 // Returns the existing media IDs on a product. Used before replacing on UPDATE.
 export const PRODUCT_MEDIA_QUERY = /* GraphQL */ `
   query ProductMedia($id: ID!) {

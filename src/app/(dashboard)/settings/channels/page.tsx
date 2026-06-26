@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import ConnectShopifyForm from "./connect-shopify-form";
 import ImportButton from "./import-button";
+import RegisterWebhooksButton from "./register-webhooks-button";
 import { disconnectChannel } from "./actions";
 
 interface PageProps {
@@ -28,8 +29,13 @@ export default async function ChannelsPage({ searchParams }: PageProps) {
     params.connected === "shopify" ? "Shopify connected successfully." : null;
   const errorMsg = params.error ? ERROR_MESSAGES[params.error] ?? params.error : null;
 
+  // Exclude unit-test fixtures (test-*.myshopify.com) so they don't pollute the UI
+  // when `npm test` writes to the same DB. Drop this filter when we have a separate test DB.
   const connections = await db.channelConnection.findMany({
-    where: { deletedAt: null },
+    where: {
+      deletedAt: null,
+      NOT: { shopDomain: { startsWith: "test-" } },
+    },
     orderBy: { installedAt: "desc" },
   });
 
@@ -83,6 +89,14 @@ export default async function ChannelsPage({ searchParams }: PageProps) {
         {shopifyConnection ? (
           <div className="space-y-4">
             <ImportButton connectionId={shopifyConnection.id} />
+            <div className="pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-2">
+                Webhooks let Shopify push real-time events to us (product
+                deletes, orders, inventory changes). Set <code>WEBHOOK_BASE_URL</code>{" "}
+                in <code>.env</code> to your tunnel URL, then click below.
+              </p>
+              <RegisterWebhooksButton connectionId={shopifyConnection.id} />
+            </div>
             <form action={disconnectChannel.bind(null, shopifyConnection.id)}>
               <button
                 type="submit"

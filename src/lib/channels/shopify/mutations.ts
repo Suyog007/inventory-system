@@ -147,6 +147,44 @@ export const PRODUCT_CREATE_MEDIA = /* GraphQL */ `
   }
 `;
 
+// Creates a webhook subscription. Shopify will POST to callbackUrl when the
+// topic fires (e.g. PRODUCTS_DELETE, ORDERS_CREATE).
+export const WEBHOOK_SUBSCRIPTION_CREATE = /* GraphQL */ `
+  mutation WebhookSubscriptionCreate(
+    $topic: WebhookSubscriptionTopic!
+    $webhookSubscription: WebhookSubscriptionInput!
+  ) {
+    webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+      webhookSubscription {
+        id
+        topic
+        endpoint {
+          ... on WebhookHttpEndpoint {
+            callbackUrl
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+// Removes a webhook subscription (used to clean up stale registrations).
+export const WEBHOOK_SUBSCRIPTION_DELETE = /* GraphQL */ `
+  mutation WebhookSubscriptionDelete($id: ID!) {
+    webhookSubscriptionDelete(id: $id) {
+      deletedWebhookSubscriptionId
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 // Stages a file upload to Shopify's CDN (Google Cloud Storage under the hood).
 // Returns a target URL + parameters for a multipart POST + a resourceUrl that
 // can later be passed to productCreateMedia.

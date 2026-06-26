@@ -34,3 +34,12 @@ export function getAppBaseUrl(): string {
 export function getInstallRedirectUri(): string {
   return `${getAppBaseUrl()}/api/channels/shopify/callback`;
 }
+
+/**
+ * Public URL Shopify uses to POST webhooks to us. Must be HTTPS.
+ * Prefer WEBHOOK_BASE_URL (set to tunnel URL in dev); fall back to AUTH_URL.
+ */
+export function getWebhookCallbackUrl(): string {
+  const base = (process.env.WEBHOOK_BASE_URL || getAppBaseUrl()).replace(/\/$/, "");
+  return `${base}/api/webhooks/shopify`;
+}

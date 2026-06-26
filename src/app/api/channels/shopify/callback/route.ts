@@ -4,7 +4,12 @@ import { auth } from "@/auth";
 import { exchangeCodeForToken, isValidShopDomain } from "@/lib/channels/shopify/oauth";
 import { encryptToken } from "@/lib/crypto";
 import { db } from "@/lib/db";
-import { SHOPIFY_SCOPES } from "@/lib/channels/shopify/config";
+import {
+  SHOPIFY_SCOPES,
+  getWebhookCallbackUrl,
+} from "@/lib/channels/shopify/config";
+import { ShopifyClient } from "@/lib/channels/shopify/client";
+import { registerShopifyWebhooks } from "@/lib/channels/shopify/webhook-subscriptions";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +79,17 @@ export async function GET(req: Request) {
         deletedAt: null,
       },
     });
+
+    // Register webhook subscriptions so Shopify pushes real-time events to us.
+    // Non-fatal: if this fails (e.g. WEBHOOK_BASE_URL not set / not HTTPS),
+    // we still consider the install successful — user can re-register from UI.
+    try {
+      const client = new ShopifyClient(shopParam, accessToken);
+      const result = await registerShopifyWebhooks(client, getWebhookCallbackUrl());
+      console.log("[shopify webhooks]", result);
+    } catch (err) {
+      console.warn("[shopify webhooks] registration failed (non-fatal):", err);
+    }
 
     return NextResponse.redirect(
       new URL("/settings/channels?connected=shopify", req.url),
