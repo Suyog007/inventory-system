@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# inventory-system — Vercel variant
 
-## Getting Started
+Trading-card inventory and multi-channel sales platform. **This repo is the Vercel-deployed variant.** Same app, but configured for Vercel + Neon. For the EC2 / Docker variant see [ibriz/collectorclub-inventory](https://github.com/ibriz/collectorclub-inventory).
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, React 19) — UI + API routes + server actions
+- **Prisma 7 + PostgreSQL** — DB (Neon in prod, Docker locally)
+- **NextAuth v5** — email/password + Google sign-in, ADMIN / STAFF roles
+- **Shopify Admin GraphQL API** — connect, import, push, webhooks
+- **Vitest + Playwright** — unit + e2e tests
+- **Vercel Cron** — outbox worker + nightly reconcile (no long-running processes)
+
+## Local development
 
 ```bash
+# 1. Postgres in Docker
+npm run db:up
+
+# 2. Install + migrate + seed admin user
+npm install
+npm run db:migrate
+npm run db:seed
+
+# 3. Dev server + outbox worker (separate terminals)
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run worker  # not used in Vercel prod — cron handles it
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000 — sign in with the seeded admin (see `.env.example`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploying to Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+See [`docs/DEPLOY-VERCEL.md`](docs/DEPLOY-VERCEL.md) for the full step-by-step.
 
-## Learn More
+Short version:
+1. Create a Postgres database on [Neon](https://neon.tech) (free tier)
+2. Import this repo in Vercel
+3. Set env vars in the Vercel dashboard (see `.env.example`)
+4. `DATABASE_URL=<neon-url> npx prisma migrate deploy && npm run db:seed` from your laptop
+5. Update Shopify Dev Dashboard + Google OAuth redirect URIs to your Vercel URL
+6. Click **Connect Shopify** in the deployed app — webhooks auto-register
 
-To learn more about Next.js, take a look at the following resources:
+## Differences from the EC2 variant
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| | This repo (Vercel) | ibriz/collectorclub-inventory (EC2) |
+|---|---|---|
+| Outbox worker | `/api/cron/process-outbox` (Vercel Cron, every minute) | `npm run worker` (long-running process) |
+| Reconcile cron | `/api/cron/reconcile` (Vercel Cron, nightly) | systemd / OS cron |
+| Postgres | Neon (managed) | Docker container or RDS |
+| HTTPS / public URL | Vercel automatic | Nginx / Caddy + Let's Encrypt |
+| Deployment | `git push` → auto-deploy | `docker compose up` / manual |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+App source under `src/` is identical between the two repos.
