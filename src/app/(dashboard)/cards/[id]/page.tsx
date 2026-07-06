@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import {
-  CARD_STATUS_STYLES,
   LISTING_STATUS_STYLES,
   PARSE_SOURCE_STYLES,
   formatGraderGrade,
@@ -21,6 +20,8 @@ export default async function CardDetailPage({ params }: PageProps) {
   const card = await db.card.findUnique({
     where: { id },
     include: {
+      category: true,
+      pricingProfile: true,
       images: { orderBy: { position: "asc" } },
       variants: {
         where: { deletedAt: null },
@@ -40,22 +41,30 @@ export default async function CardDetailPage({ params }: PageProps) {
   if (!card || card.deletedAt) notFound();
 
   const fields: Array<{ label: string; value: React.ReactNode }> = [
+    { label: "Category", value: card.category?.name },
+    { label: "Manufacturer", value: card.manufacturer },
+    { label: "Vendor (Shopify)", value: card.vendor },
     { label: "Player", value: card.player },
     { label: "Set", value: card.setName },
     { label: "Year", value: card.year },
     { label: "Card #", value: card.cardNumber },
-    { label: "Variant", value: card.variantName },
-    {
-      label: "Grade",
-      value: formatGraderGrade(card.grader, card.grade),
-    },
+    { label: "Parallel/Variety", value: card.variantName },
+    { label: "Grade", value: formatGraderGrade(card.grader, card.grade) },
     { label: "Cert #", value: card.certNumber },
+    { label: "Autograph Authentication", value: card.autographAuthentication },
+    {
+      label: "Autograph Grade",
+      value: card.autographGrade?.toString() ?? null,
+    },
+    { label: "Population", value: card.population },
+    { label: "Population Higher", value: card.populationHigher },
+    { label: "Game (TCG)", value: card.game },
+    { label: "Rarity (TCG)", value: card.rarity },
+    { label: "TCGplayer ID", value: card.tcgplayerId },
     { label: "Sport", value: card.sport },
     { label: "League", value: card.league },
     { label: "Team", value: card.team },
     { label: "Condition", value: card.condition },
-    { label: "Vendor", value: card.vendor },
-    { label: "Product type", value: card.productType },
   ];
 
   return (
@@ -69,15 +78,20 @@ export default async function CardDetailPage({ params }: PageProps) {
             <h1 className="text-2xl font-bold">{card.title}</h1>
             <div className="flex gap-2 mt-2">
               <span
-                className={`inline-block px-2 py-0.5 text-xs font-medium rounded ${CARD_STATUS_STYLES[card.status]}`}
-              >
-                {card.status}
-              </span>
-              <span
                 className={`inline-block px-2 py-0.5 text-xs font-medium rounded ${PARSE_SOURCE_STYLES[card.parseSource]}`}
               >
                 {card.parseSource}
               </span>
+              {card.category && (
+                <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-purple-100 text-purple-700">
+                  {card.category.name}
+                </span>
+              )}
+              {card.pricingProfile && (
+                <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-indigo-100 text-indigo-700">
+                  {card.pricingProfile.name} pricing
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -149,9 +163,9 @@ export default async function CardDetailPage({ params }: PageProps) {
               </div>
             )}
             {card.descriptionHtml && (
-              <details className="mt-4">
+              <details className="mt-4" open>
                 <summary className="text-sm text-gray-600 cursor-pointer">
-                  Original description
+                  Description
                 </summary>
                 <div
                   className="mt-2 prose prose-sm max-w-none text-gray-700"
@@ -171,15 +185,32 @@ export default async function CardDetailPage({ params }: PageProps) {
                   <tr>
                     <th className="pb-2">Name</th>
                     <th className="pb-2">SKU</th>
-                    <th className="pb-2">Quantity</th>
+                    <th className="pb-2">Qty</th>
+                    <th className="pb-2">Listing $</th>
+                    <th className="pb-2">Cost</th>
+                    <th className="pb-2">Purchased</th>
                   </tr>
                 </thead>
                 <tbody>
                   {card.variants.map((v) => (
                     <tr key={v.id} className="border-t">
                       <td className="py-2">{v.name}</td>
-                      <td className="py-2 font-mono text-xs">{v.sku ?? "—"}</td>
+                      <td className="py-2 font-mono text-xs">
+                        {v.sku ?? "—"}
+                      </td>
                       <td className="py-2">{v.quantity}</td>
+                      <td className="py-2">{formatPrice(v.listingPrice)}</td>
+                      <td className="py-2">{formatPrice(v.itemCost)}</td>
+                      <td className="py-2 text-xs text-gray-600">
+                        {v.purchaseDate
+                          ? new Date(v.purchaseDate).toLocaleDateString()
+                          : "—"}
+                        {v.purchasedFrom && (
+                          <span className="block text-gray-500">
+                            {v.purchasedFrom}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -190,7 +221,9 @@ export default async function CardDetailPage({ params }: PageProps) {
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="font-semibold mb-4">Listings per channel</h2>
             {card.variants.flatMap((v) => v.listings).length === 0 ? (
-              <p className="text-sm text-gray-500">Not listed on any channel.</p>
+              <p className="text-sm text-gray-500">
+                Not listed on any channel (inventory only).
+              </p>
             ) : (
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-gray-500 uppercase tracking-wider">

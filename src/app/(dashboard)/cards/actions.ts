@@ -6,15 +6,13 @@ import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { flushOutboxNow } from "@/lib/sync/outbox";
-import { parseShopifyCard, type ParseSource } from "@/lib/parser";
+import type { ParseSource } from "@/lib/parser";
+import { renderText, renderHtml, resolveTokenValues } from "@/lib/templates/render";
 
 const cardFieldsSchema = z.object({
-  title: z.string().min(1, "Title is required"),
-  descriptionHtml: z.string().optional(),
   vendor: z.string().optional(),
-  productType: z.string().optional(),
-  shopifyCategoryId: z.string().optional(),
-  status: z.enum(["ACTIVE", "DRAFT", "ARCHIVED"]),
+  manufacturer: z.string().optional(),
+  categoryId: z.string().min(1, "Category is required"),
   // Card structured fields (all optional)
   player: z.string().optional(),
   setName: z.string().optional(),
@@ -24,22 +22,109 @@ const cardFieldsSchema = z.object({
   grader: z.string().optional(),
   grade: z.string().optional(),
   certNumber: z.string().optional(),
+  autographAuthentication: z.string().optional(),
+  autographGrade: z.string().optional(),
+  population: z.string().optional(),
+  populationHigher: z.string().optional(),
+  rarity: z.string().optional(),
+  tcgplayerId: z.string().optional(),
+  game: z.string().optional(),
   sport: z.string().optional(),
   league: z.string().optional(),
   team: z.string().optional(),
   condition: z.string().optional(),
-  tags: z.string().optional(), // comma-separated
-  imageUrls: z.string().optional(), // newline-separated URLs
+  tags: z.string().optional(),
+  imageUrls: z.string().optional(),
   // Variant + listing fields
   sku: z.string().optional(),
   quantity: z.string().optional(),
-  price: z.string().min(1, "Price is required"),
+  listingPrice: z.string().min(1, "Listing price is required"),
+  purchaseDate: z.string().optional(),
+  purchasedFrom: z.string().optional(),
+  itemCost: z.string().optional(),
+  // Marketplace overrides — apply to every Listing tied to this card.
+  useTitleTemplate: z.string().optional(),
+  useDescriptionTemplate: z.string().optional(),
+  titleOverride: z.string().optional(),
+  descriptionHtmlOverride: z.string().optional(),
+  pricingProfileId: z.string().optional(),
+  // Which channels to publish to. Empty string / undefined = inventory only.
+  channelConnectionIds: z.string().optional(),
 });
 
 export type CardActionResult =
   | { error: string }
   | { success: string; cardId: string }
   | undefined;
+
+// Renders the canonical title + description that will be stored on Card.
+// - Use Template on → look up the category's default (channel=null) template,
+//   render with the card's structured fields.
+// - Use Template off → use the user-supplied override text.
+// The result becomes both Card.title / Card.descriptionHtml (used for dashboard
+// display + fallback) AND the value the outbox pushes to Shopify.
+//
+// Structured-field types are relaxed to `Record<string, unknown>` here because
+// callers hand us plain form output (numbers, strings) rather than Prisma
+// Decimal instances. The render layer only ever stringifies values, so this is
+// safe.
+async function computeRenderedTitleAndDescription(opts: {
+  categoryId: string;
+  useTitleTemplate: boolean;
+  useDescriptionTemplate: boolean;
+  titleOverride: string | null;
+  descriptionHtmlOverride: string | null;
+  cardFields: Record<string, unknown>;
+  variantFields: Record<string, unknown>;
+}): Promise<{ title: string; descriptionHtml: string }> {
+  const category = await db.category.findUnique({
+    where: { id: opts.categoryId },
+    include: { templates: { where: { channel: null } } },
+  });
+
+  // Inject the category name so {Category} tokens resolve.
+  const cardWithCategory = {
+    ...opts.cardFields,
+    category: category ? { name: category.name } : null,
+  };
+  const tokens = resolveTokenValues(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cardWithCategory as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts.variantFields as any,
+  );
+
+  let title = "";
+  if (opts.useTitleTemplate) {
+    const t = category?.templates.find((t) => t.kind === "TITLE");
+    title = t ? renderText(t.body, tokens) : "";
+  } else {
+    title = opts.titleOverride ?? "";
+  }
+  if (!title) title = "(Untitled)";
+
+  let descriptionHtml = "";
+  if (opts.useDescriptionTemplate) {
+    const t = category?.templates.find((t) => t.kind === "DESCRIPTION");
+    descriptionHtml = t ? renderHtml(t.body, tokens) : "";
+  } else {
+    descriptionHtml = opts.descriptionHtmlOverride ?? "";
+  }
+
+  return { title, descriptionHtml };
+}
+
+function parseOptionalDecimal(s?: string): number | null {
+  if (s === undefined || s === "") return null;
+  const n = Number.parseFloat(s);
+  return Number.isNaN(n) ? null : n;
+}
+
+function parseOptionalInt(s?: string): number | null {
+  if (s === undefined || s === "") return null;
+  const n = Number.parseInt(s, 10);
+  return Number.isNaN(n) ? null : n;
+}
 
 function normalizeFields(raw: Record<string, FormDataEntryValue>) {
   const parsed = cardFieldsSchema.safeParse(raw);
@@ -51,66 +136,48 @@ function normalizeFields(raw: Record<string, FormDataEntryValue>) {
   }
   const d = parsed.data;
 
-  // Auto-parse the description for any structured fields the user left blank.
-  // User-provided values always win over parser-inferred values.
-  const parseResult = parseShopifyCard({
-    title: d.title,
-    descriptionHtml: d.descriptionHtml,
-    productType: d.productType,
-  });
-  const p = parseResult.fields;
+  const channelIds = (d.channelConnectionIds ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
-  // Helper: user value if provided, else parsed, else null
-  const merge = <T>(userVal: T | undefined | null, parsedVal: T | undefined): T | null => {
-    if (userVal !== undefined && userVal !== null && userVal !== "") return userVal;
-    return parsedVal ?? null;
-  };
+  // Checkboxes only post their `value` when checked; "1" means on.
+  const useTitleTemplate = d.useTitleTemplate === "1";
+  const useDescriptionTemplate = d.useDescriptionTemplate === "1";
 
-  const userProvidedAnyStructured = [
-    d.player,
-    d.setName,
-    d.year,
-    d.cardNumber,
-    d.variantName,
-    d.grader,
-    d.grade,
-    d.certNumber,
-    d.sport,
-    d.league,
-    d.team,
-    d.condition,
-  ].some((v) => v !== undefined && v !== null && v !== "");
-
-  // If user typed any structured field by hand, it's MANUAL_OVERRIDE.
-  // Otherwise reflect what the parser found.
-  const parseSource: ParseSource = userProvidedAnyStructured
-    ? "MANUAL_OVERRIDE"
-    : parseResult.parseSource;
+  // Title/description no longer come in as top-level fields — they're computed
+  // from the Marketplace section via templates or overrides. Parser is only
+  // useful during import; form users type structured fields directly.
+  const parseSource: ParseSource = "MANUAL_OVERRIDE";
 
   return {
     ok: true as const,
-    card: {
-      title: d.title,
-      descriptionHtml: d.descriptionHtml?.trim() || null,
+    // Everything except title + descriptionHtml — those get computed
+    // asynchronously in the caller via computeRenderedTitleAndDescription().
+    cardExceptTitle: {
       vendor: d.vendor?.trim() || null,
-      productType: d.productType?.trim() || null,
-      shopifyCategoryId: d.shopifyCategoryId?.trim() || null,
-      status: d.status,
-      player: merge(d.player?.trim(), p.player),
-      setName: merge(d.setName?.trim(), p.setName),
-      year: merge(d.year ? Number.parseInt(d.year, 10) : null, p.year),
-      cardNumber: merge(d.cardNumber?.trim(), p.cardNumber),
-      variantName: merge(d.variantName?.trim(), p.variantName),
-      grader: merge(
-        d.grader?.trim() ? d.grader.trim().toUpperCase() : null,
-        p.grader,
-      ),
-      grade: merge(d.grade ? Number.parseFloat(d.grade) : null, p.grade),
-      certNumber: merge(d.certNumber?.trim(), p.certNumber),
-      sport: merge(d.sport?.trim(), p.sport),
-      league: merge(d.league?.trim(), p.league),
-      team: merge(d.team?.trim(), p.team),
-      condition: merge(d.condition?.trim(), p.condition),
+      manufacturer: d.manufacturer?.trim() || null,
+      categoryId: d.categoryId,
+      player: d.player?.trim() || null,
+      setName: d.setName?.trim() || null,
+      year: d.year ? Number.parseInt(d.year, 10) : null,
+      cardNumber: d.cardNumber?.trim() || null,
+      variantName: d.variantName?.trim() || null,
+      grader: d.grader?.trim() ? d.grader.trim().toUpperCase() : null,
+      grade: d.grade ? Number.parseFloat(d.grade) : null,
+      certNumber: d.certNumber?.trim() || null,
+      autographAuthentication: d.autographAuthentication?.trim() || null,
+      autographGrade: parseOptionalDecimal(d.autographGrade),
+      population: parseOptionalInt(d.population),
+      populationHigher: parseOptionalInt(d.populationHigher),
+      rarity: d.rarity?.trim() || null,
+      tcgplayerId: d.tcgplayerId?.trim() || null,
+      game: d.game?.trim() || null,
+      sport: d.sport?.trim() || null,
+      league: d.league?.trim() || null,
+      team: d.team?.trim() || null,
+      condition: d.condition?.trim() || null,
+      pricingProfileId: d.pricingProfileId?.trim() || null,
     },
     parseSource,
     tagNames: (d.tags ?? "")
@@ -123,7 +190,17 @@ function normalizeFields(raw: Record<string, FormDataEntryValue>) {
       .filter((u) => /^https?:\/\//.test(u)),
     sku: d.sku?.trim() || null,
     quantity: d.quantity ? Number.parseInt(d.quantity, 10) : 0,
-    price: Number.parseFloat(d.price),
+    listingPrice: Number.parseFloat(d.listingPrice),
+    purchaseDate: d.purchaseDate ? new Date(d.purchaseDate) : null,
+    purchasedFrom: d.purchasedFrom?.trim() || null,
+    itemCost: parseOptionalDecimal(d.itemCost),
+    channelIds,
+    marketplace: {
+      useTitleTemplate,
+      useDescriptionTemplate,
+      titleOverride: d.titleOverride?.trim() || null,
+      descriptionHtmlOverride: d.descriptionHtmlOverride?.trim() || null,
+    },
   };
 }
 
@@ -147,6 +224,128 @@ async function syncTags(cardId: string, names: string[]) {
   }
 }
 
+interface MarketplaceOverrides {
+  useTitleTemplate: boolean;
+  useDescriptionTemplate: boolean;
+  titleOverride: string | null;
+  descriptionHtmlOverride: string | null;
+}
+
+// Sync the set of Listing rows for a variant against the requested channel IDs.
+// - New channel checked → create Listing + enqueue CREATE_LISTING
+// - Already active + still checked → enqueue UPDATE_LISTING (price/template changes)
+// - Active but unchecked → soft-delete Listing + enqueue DELETE_LISTING
+// Marketplace overrides propagate to every Listing tied to this card so all
+// channels stay in sync with the user's Use-Template choice.
+async function syncListings(opts: {
+  variantId: string;
+  listingPrice: number;
+  desiredChannelIds: string[];
+  userId: string;
+  marketplace: MarketplaceOverrides;
+}) {
+  const { variantId, listingPrice, desiredChannelIds, userId, marketplace } =
+    opts;
+
+  const existing = await db.listing.findMany({
+    where: { variantId },
+  });
+
+  const desired = new Set(desiredChannelIds);
+  const activeByChannel = new Map<string, (typeof existing)[number]>();
+  for (const l of existing) {
+    if (!l.deletedAt) activeByChannel.set(l.channelConnectionId, l);
+  }
+
+  const listingOverrides = {
+    useTitleTemplate: marketplace.useTitleTemplate,
+    useDescriptionTemplate: marketplace.useDescriptionTemplate,
+    titleOverride: marketplace.titleOverride,
+    descriptionHtmlOverride: marketplace.descriptionHtmlOverride,
+  };
+
+  // Newly checked → CREATE (or restore soft-deleted).
+  for (const channelId of desired) {
+    const active = activeByChannel.get(channelId);
+    if (active) continue; // handled below as UPDATE
+
+    const softDeleted = existing.find(
+      (l) => l.channelConnectionId === channelId && l.deletedAt,
+    );
+    let listing;
+    if (softDeleted) {
+      listing = await db.listing.update({
+        where: { id: softDeleted.id },
+        data: {
+          deletedAt: null,
+          status: "ACTIVE",
+          price: listingPrice,
+          externalId: `local-${softDeleted.id}`,
+          externalParentId: null,
+          externalUrl: null,
+          ...listingOverrides,
+        },
+      });
+    } else {
+      listing = await db.listing.create({
+        data: {
+          variantId,
+          channelConnectionId: channelId,
+          externalId: `local-${variantId}-${channelId}`,
+          status: "ACTIVE",
+          price: listingPrice,
+          ...listingOverrides,
+        },
+      });
+    }
+
+    await db.outboxItem.create({
+      data: {
+        channelConnectionId: channelId,
+        userId,
+        operation: "CREATE_LISTING",
+        targetType: "Listing",
+        targetId: listing.id,
+        payload: { listingId: listing.id },
+      },
+    });
+  }
+
+  // Already active → UPDATE (price + template changes will re-render at push).
+  for (const [channelId, listing] of activeByChannel) {
+    if (!desired.has(channelId)) continue;
+    await db.listing.update({
+      where: { id: listing.id },
+      data: { price: listingPrice, ...listingOverrides },
+    });
+    await db.outboxItem.create({
+      data: {
+        channelConnectionId: channelId,
+        userId,
+        operation: "UPDATE_LISTING",
+        targetType: "Listing",
+        targetId: listing.id,
+        payload: { listingId: listing.id },
+      },
+    });
+  }
+
+  // Active but unchecked → DELETE.
+  for (const [channelId, listing] of activeByChannel) {
+    if (desired.has(channelId)) continue;
+    await db.outboxItem.create({
+      data: {
+        channelConnectionId: channelId,
+        userId,
+        operation: "DELETE_LISTING",
+        targetType: "Listing",
+        targetId: listing.id,
+        payload: { listingId: listing.id },
+      },
+    });
+  }
+}
+
 export async function updateCard(
   cardId: string,
   _prev: CardActionResult,
@@ -160,12 +359,33 @@ export async function updateCard(
 
   const card = await db.card.findUnique({
     where: { id: cardId },
-    include: { variants: { orderBy: { position: "asc" }, take: 1, include: { listings: true } } },
+    include: { variants: { orderBy: { position: "asc" }, take: 1 } },
   });
   if (!card) return { error: "Card not found" };
 
-  // Apply changes locally
-  await db.card.update({ where: { id: cardId }, data: { ...n.card, parseSource: n.parseSource } });
+  const rendered = await computeRenderedTitleAndDescription({
+    categoryId: n.cardExceptTitle.categoryId,
+    useTitleTemplate: n.marketplace.useTitleTemplate,
+    useDescriptionTemplate: n.marketplace.useDescriptionTemplate,
+    titleOverride: n.marketplace.titleOverride,
+    descriptionHtmlOverride: n.marketplace.descriptionHtmlOverride,
+    cardFields: n.cardExceptTitle,
+    variantFields: {
+      sku: n.sku,
+      quantity: n.quantity,
+      itemCost: n.itemCost,
+    },
+  });
+
+  await db.card.update({
+    where: { id: cardId },
+    data: {
+      ...n.cardExceptTitle,
+      title: rendered.title,
+      descriptionHtml: rendered.descriptionHtml || null,
+      parseSource: n.parseSource,
+    },
+  });
   await syncTags(cardId, n.tagNames);
   await syncImages(cardId, n.imageUrls);
 
@@ -173,38 +393,29 @@ export async function updateCard(
   if (variant) {
     await db.variant.update({
       where: { id: variant.id },
-      data: { sku: n.sku, quantity: n.quantity },
+      data: {
+        sku: n.sku,
+        quantity: n.quantity,
+        listingPrice: n.listingPrice,
+        purchaseDate: n.purchaseDate,
+        purchasedFrom: n.purchasedFrom,
+        itemCost: n.itemCost,
+      },
     });
-    const listing = variant.listings[0];
-    if (listing) {
-      await db.listing.update({
-        where: { id: listing.id },
-        data: { price: n.price, status: n.card.status },
-      });
-      // Enqueue outbox
-      await db.outboxItem.create({
-        data: {
-          channelConnectionId: listing.channelConnectionId,
-          userId: session.user.id,
-          operation: "UPDATE_LISTING",
-          targetType: "Listing",
-          targetId: listing.id,
-          payload: { listingId: listing.id },
-        },
-      });
-      // Try to push immediately so the user sees the sync result without waiting for the worker
-      await flushOutboxNow(5);
-    }
+    await syncListings({
+      variantId: variant.id,
+      listingPrice: n.listingPrice,
+      desiredChannelIds: n.channelIds,
+      userId: session.user.id,
+      marketplace: n.marketplace,
+    });
+    await flushOutboxNow(10);
   }
 
   revalidatePath(`/cards/${cardId}`);
   revalidatePath("/cards");
   redirect(`/cards/${cardId}`);
 }
-
-const createSchema = cardFieldsSchema.extend({
-  channelConnectionId: z.string().min(1, "Pick a channel"),
-});
 
 export async function createCard(
   _prev: CardActionResult,
@@ -213,48 +424,64 @@ export async function createCard(
   const session = await auth();
   if (!session?.user) return { error: "Unauthorized" };
 
-  const raw = Object.fromEntries(formData);
-  const parsed = createSchema.safeParse(raw);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
-
-  const n = normalizeFields(raw);
+  const n = normalizeFields(Object.fromEntries(formData));
   if (!n.ok) return { error: n.error };
 
-  const connection = await db.channelConnection.findUnique({
-    where: { id: parsed.data.channelConnectionId },
+  // Pick the default pricing profile for new cards.
+  const defaultProfile = await db.pricingProfile.findFirst({
+    where: { isDefault: true, deletedAt: null },
   });
-  if (!connection || connection.deletedAt) {
-    return { error: "Channel connection not found." };
-  }
 
-  // Create locally (with placeholder externalId; worker will replace after Shopify CREATE)
-  const card = await db.card.create({ data: { ...n.card, parseSource: n.parseSource } });
+  const rendered = await computeRenderedTitleAndDescription({
+    categoryId: n.cardExceptTitle.categoryId,
+    useTitleTemplate: n.marketplace.useTitleTemplate,
+    useDescriptionTemplate: n.marketplace.useDescriptionTemplate,
+    titleOverride: n.marketplace.titleOverride,
+    descriptionHtmlOverride: n.marketplace.descriptionHtmlOverride,
+    cardFields: n.cardExceptTitle,
+    variantFields: {
+      sku: n.sku,
+      quantity: n.quantity,
+      itemCost: n.itemCost,
+    },
+  });
+
+  const card = await db.card.create({
+    data: {
+      ...n.cardExceptTitle,
+      title: rendered.title,
+      descriptionHtml: rendered.descriptionHtml || null,
+      parseSource: n.parseSource,
+      // Form value wins; else fall back to system default.
+      pricingProfileId:
+        n.cardExceptTitle.pricingProfileId ?? defaultProfile?.id ?? null,
+    },
+  });
   await syncTags(card.id, n.tagNames);
   await syncImages(card.id, n.imageUrls);
+
   const variant = await db.variant.create({
-    data: { cardId: card.id, name: "Default", sku: n.sku, quantity: n.quantity, position: 1 },
-  });
-  const placeholder = `local-${card.id}`;
-  const listing = await db.listing.create({
     data: {
-      variantId: variant.id,
-      channelConnectionId: connection.id,
-      externalId: placeholder,
-      status: n.card.status,
-      price: n.price,
+      cardId: card.id,
+      name: "Default",
+      sku: n.sku,
+      quantity: n.quantity,
+      listingPrice: n.listingPrice,
+      purchaseDate: n.purchaseDate,
+      purchasedFrom: n.purchasedFrom,
+      itemCost: n.itemCost,
+      position: 1,
     },
   });
-  await db.outboxItem.create({
-    data: {
-      channelConnectionId: connection.id,
-      userId: session.user.id,
-      operation: "CREATE_LISTING",
-      targetType: "Listing",
-      targetId: listing.id,
-      payload: { listingId: listing.id },
-    },
+
+  await syncListings({
+    variantId: variant.id,
+    listingPrice: n.listingPrice,
+    desiredChannelIds: n.channelIds,
+    userId: session.user.id,
+    marketplace: n.marketplace,
   });
-  await flushOutboxNow(5);
+  await flushOutboxNow(10);
 
   revalidatePath("/cards");
   redirect(`/cards/${card.id}`);

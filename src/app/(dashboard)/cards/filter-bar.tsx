@@ -3,31 +3,38 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+interface Category {
+  id: string;
+  name: string;
+}
+
 interface Props {
   defaultQ: string;
-  defaultStatus: string;
+  defaultCategory: string;
   defaultGrader: string;
+  categories: Category[];
   graders: string[];
 }
 
 export default function CardsFilterBar({
   defaultQ,
-  defaultStatus,
+  defaultCategory,
   defaultGrader,
+  categories,
   graders,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [q, setQ] = useState(defaultQ);
-  const [status, setStatus] = useState(defaultStatus);
+  const [category, setCategory] = useState(defaultCategory);
   const [grader, setGrader] = useState(defaultGrader);
 
   function apply() {
     const params = new URLSearchParams(searchParams.toString());
     if (q) params.set("q", q);
     else params.delete("q");
-    if (status) params.set("status", status);
-    else params.delete("status");
+    if (category) params.set("category", category);
+    else params.delete("category");
     if (grader) params.set("grader", grader);
     else params.delete("grader");
     params.delete("page");
@@ -36,7 +43,7 @@ export default function CardsFilterBar({
 
   function reset() {
     setQ("");
-    setStatus("");
+    setCategory("");
     setGrader("");
     router.push(`/cards`);
   }
@@ -54,14 +61,16 @@ export default function CardsFilterBar({
         className="flex-1 min-w-[260px] p-2 border border-gray-300 rounded"
       />
       <select
-        value={status}
-        onChange={(e) => setStatus(e.target.value)}
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
         className="p-2 border border-gray-300 rounded bg-white"
       >
-        <option value="">All statuses</option>
-        <option value="ACTIVE">Active</option>
-        <option value="DRAFT">Draft</option>
-        <option value="ARCHIVED">Archived</option>
+        <option value="">All categories</option>
+        {categories.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
       </select>
       <select
         value={grader}

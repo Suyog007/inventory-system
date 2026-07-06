@@ -2,10 +2,10 @@ import { db } from "@/lib/db";
 import Link from "next/link";
 import NewCardForm from "./new-form";
 
-// Find the most common existing vendor / productType to pre-fill the form.
-// Avoids the "vendor defaulted to shop name" surprise.
+// Pre-fill the most-common vendor / manufacturer / category from existing cards
+// so the form starts with reasonable defaults instead of empty inputs.
 async function getCommonDefaults() {
-  const [vendorRow, typeRow, categoryRow] = await Promise.all([
+  const [vendorRow, manufacturerRow, categoryRow] = await Promise.all([
     db.card.groupBy({
       by: ["vendor"],
       where: { deletedAt: null, vendor: { not: null } },
@@ -14,59 +14,74 @@ async function getCommonDefaults() {
       take: 1,
     }),
     db.card.groupBy({
-      by: ["productType"],
-      where: { deletedAt: null, productType: { not: null } },
-      _count: { productType: true },
-      orderBy: { _count: { productType: "desc" } },
+      by: ["manufacturer"],
+      where: { deletedAt: null, manufacturer: { not: null } },
+      _count: { manufacturer: true },
+      orderBy: { _count: { manufacturer: "desc" } },
       take: 1,
     }),
     db.card.groupBy({
-      by: ["shopifyCategoryId"],
-      where: { deletedAt: null, shopifyCategoryId: { not: null } },
-      _count: { shopifyCategoryId: true },
-      orderBy: { _count: { shopifyCategoryId: "desc" } },
+      by: ["categoryId"],
+      where: { deletedAt: null, categoryId: { not: null } },
+      _count: { categoryId: true },
+      orderBy: { _count: { categoryId: "desc" } },
       take: 1,
     }),
   ]);
   return {
     vendor: vendorRow[0]?.vendor ?? "",
-    productType: typeRow[0]?.productType ?? "",
-    shopifyCategoryId: categoryRow[0]?.shopifyCategoryId ?? "",
+    manufacturer: manufacturerRow[0]?.manufacturer ?? "",
+    categoryId: categoryRow[0]?.categoryId ?? "",
   };
 }
 
 export default async function NewCardPage() {
-  const [connections, defaults] = await Promise.all([
+  const [connections, categories, pricingProfiles, defaults] = await Promise.all([
     db.channelConnection.findMany({
       where: { deletedAt: null },
       orderBy: { installedAt: "asc" },
       select: { id: true, channel: true, shopDomain: true },
     }),
+    db.category.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ position: "asc" }, { name: "asc" }],
+      select: { id: true, name: true },
+    }),
+    db.pricingProfile.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+      select: { id: true, name: true },
+    }),
     getCommonDefaults(),
   ]);
 
   return (
-    <div className="max-w-4xl space-y-4">
+    <div className="max-w-6xl space-y-4">
       <div>
         <Link href="/cards" className="text-sm text-gray-600 hover:underline">
           ← Back to cards
         </Link>
         <h1 className="text-2xl font-bold mt-2">Add a new card</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Saved to your DB and queued for sync to the selected channel.
+          Saved locally and queued for sync to the channels you check.
         </p>
       </div>
 
-      {connections.length === 0 ? (
+      {categories.length === 0 ? (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 p-4 rounded">
-          Connect a channel first in{" "}
-          <Link href="/settings/channels" className="underline">
-            Settings → Channels
+          Create at least one category first in{" "}
+          <Link href="/settings/categories" className="underline">
+            Settings → Categories
           </Link>
           .
         </div>
       ) : (
-        <NewCardForm channels={connections} defaults={defaults} />
+        <NewCardForm
+          channels={connections}
+          categories={categories}
+          pricingProfiles={pricingProfiles}
+          defaults={defaults}
+        />
       )}
     </div>
   );

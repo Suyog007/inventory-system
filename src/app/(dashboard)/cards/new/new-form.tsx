@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { createCard, type CardActionResult } from "../actions";
 import CardFormFields from "../card-form-fields";
+import ChannelCheckboxList from "../channel-checkbox-list";
 
 interface Channel {
   id: string;
@@ -11,9 +12,21 @@ interface Channel {
   shopDomain: string | null;
 }
 
+interface Category {
+  id: string;
+  name: string;
+}
+
+interface PricingProfile {
+  id: string;
+  name: string;
+}
+
 interface Props {
   channels: Channel[];
-  defaults?: { vendor?: string; productType?: string; shopifyCategoryId?: string };
+  categories: Category[];
+  pricingProfiles: PricingProfile[];
+  defaults?: Parameters<typeof CardFormFields>[0]["defaults"];
 }
 
 function SubmitButton() {
@@ -29,48 +42,41 @@ function SubmitButton() {
   );
 }
 
-export default function NewCardForm({ channels, defaults }: Props) {
+export default function NewCardForm({
+  channels,
+  categories,
+  pricingProfiles,
+  defaults,
+}: Props) {
   const [result, formAction] = useActionState<CardActionResult, FormData>(
     createCard,
     undefined,
   );
 
   return (
-    <form action={formAction} className="space-y-5">
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="font-semibold mb-4">Where to list</h2>
-        <label className="block">
-          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
-            Channel <span className="text-red-600">*</span>
-          </span>
-          <select
-            name="channelConnectionId"
-            required
-            className="w-full p-2 border border-gray-300 rounded text-sm bg-white"
-          >
-            <option value="">-- pick a connected channel --</option>
-            {channels.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.channel} {c.shopDomain ? `· ${c.shopDomain}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+    <form action={formAction} className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="lg:col-span-2 space-y-5">
+        <CardFormFields
+          defaults={defaults}
+          categories={categories}
+          pricingProfiles={pricingProfiles}
+        />
 
-      <CardFormFields defaults={defaults} />
+        {result && "error" in result && (
+          <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded">
+            {result.error}
+          </div>
+        )}
 
-      {result && "error" in result && (
-        <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded">
-          {result.error}
+        <div className="flex items-center gap-3">
+          <SubmitButton />
+          <a href="/cards" className="text-gray-600 hover:underline">
+            Cancel
+          </a>
         </div>
-      )}
-
-      <div className="flex items-center gap-3">
-        <SubmitButton />
-        <a href="/cards" className="text-gray-600 hover:underline">
-          Cancel
-        </a>
+      </div>
+      <div className="lg:col-span-1">
+        <ChannelCheckboxList channels={channels} />
       </div>
     </form>
   );
