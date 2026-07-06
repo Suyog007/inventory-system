@@ -109,8 +109,8 @@ model Card {
   title           String
   descriptionHtml String?     @db.Text
   vendor          String?
-  productType     String?
-  status          CardStatus  @default(ACTIVE)
+  productType     String? // DEPRECATED: replaced by categoryId. Kept one migration cycle for safe rollback.
+  status          CardStatus  @default(ACTIVE) // DEPRECATED: publish/delist is now driven by Listing rows + soft-delete.
   parseSource     ParseSource @default(IMPORT_UNPARSED)
 
   // Card-specific facts (channel-agnostic)
@@ -118,7 +118,7 @@ model Card {
   setName     String?
   year        Int?
   cardNumber  String?
-  variantName String? // 'variant' is taken by the Variant model name; this is the card's variant (Holo, Refractor, etc.)
+  variantName String? // "Parallel/Variety" in UI (Holo, Refractor, etc.); model name Variant is taken by the inventory row.
   grader      String? // PSA, BGS, CGC, SGC, MBA
   grade       Decimal? @db.Decimal(4, 1) // e.g. 10.0, 9.5
   certNumber  String?
@@ -127,10 +127,29 @@ model Card {
   team        String?
   condition   String? // For ungraded cards (Mint, NM, etc.)
 
+  // Extended catalog fields (added post-Slice-2 client feedback)
+  manufacturer            String? // e.g. Panini, Topps, Upper Deck
+  autographAuthentication String? // e.g. PSA/DNA, JSA, Beckett
+  autographGrade          Decimal? @db.Decimal(4, 1) // grade of the auto specifically
+  population              Int? // total pop at this grader/grade
+  populationHigher        Int? // number graded higher; auto-populated later
+  rarity                  String? // TCG-side (e.g. Rare, Ultra Rare, Secret Rare)
+  tcgplayerId             String? // TCGplayer product ID
+  game                    String? // TCG-side (Pokémon, Magic, Yu-Gi-Oh, etc.)
+
   // Shopify "Category" — distinct from productType. This is the GID
   // from Shopify's Standard Product Taxonomy (e.g. "gid://shopify/TaxonomyCategory/aa-2-1-12-3").
-  // Currently Shopify-specific; will move to a channel-specific table when we add eBay etc.
+  // DEPRECATED: moved to Category.shopifyCategoryId (via categoryId FK).
   shopifyCategoryId String?
+
+  // Category is the managed replacement for the free-text productType.
+  // Templates + Shopify category mapping live on the Category row.
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  // Pricing profile drives per-channel price adjustments on push.
+  pricingProfileId String?
+  pricingProfile   PricingProfile? @relation(fields: [pricingProfileId], references: [id], onDelete: SetNull)
 
   variants Variant[]
   images   Image[]
@@ -146,6 +165,8 @@ model Card {
   @@index([grader, grade])
   @@index([certNumber])
   @@index([status])
+  @@index([categoryId])
+  @@index([pricingProfileId])
   @@index([deletedAt])
 }
 
@@ -154,9 +175,20 @@ model Variant {
   cardId   String
   card     Card    @relation(fields: [cardId], references: [id], onDelete: Cascade)
   name     String  @default("Default") // "Default", "Hobby Box", "Blaster Box", etc.
-  sku      String?
+  sku      String? // fallback SKU when no category template + no cert-based auto-rule
   quantity Int     @default(0) // PHYSICAL inventory (canonical, channel-agnostic)
   position Int     @default(1)
+
+  // Canonical listing price the user sets on the card. Per-channel prices are
+  // derived by applying PricingProfileRule adjustments at push time.
+  // Nullable-with-default because existing rows get backfilled from Listing.price
+  // during the migration (see seed).
+  listingPrice Decimal @default(0) @db.Decimal(12, 2)
+
+  // Purchase / cost tracking (client feedback)
+  purchaseDate  DateTime?
+  purchasedFrom String?
+  itemCost      Decimal?  @db.Decimal(12, 2) // pushed to Shopify inventoryItem.cost
 
   listings Listing[]
 
@@ -226,11 +258,21 @@ model Listing {
   externalParentId    String? // For channels with a parent product (Shopify product GID); null otherwise
   externalUrl         String?
   status              ListingStatus     @default(ACTIVE)
-  price               Decimal           @db.Decimal(12, 2) // CHANNEL-specific price (can differ across channels)
+  price               Decimal           @db.Decimal(12, 2) // CHANNEL-specific price (last pushed) — computed from Variant.listingPrice + PricingProfileRule at push time
   compareAtPrice      Decimal?          @db.Decimal(12, 2)
   lastSyncedAt        DateTime          @default(now())
   // NOTE: no inventory field. Inventory is canonical on Variant.quantity.
   // If we ever need split-inventory-per-channel (rare), add optional quantityOverride here.
+
+  // Per-channel template control. When useXTemplate is true (default), the outbox
+  // renders the value from the category+channel Template row. When false, it uses
+  // the stored xOverride text.
+  useTitleTemplate       Boolean @default(true)
+  useDescriptionTemplate Boolean @default(true)
+  useSkuTemplate         Boolean @default(true)
+  titleOverride          String?
+  descriptionHtmlOverride String? @db.Text
+  skuOverride            String?
 
   orderLines OrderLine[]
 
@@ -371,4 +413,84 @@ model OrderLine {
 
   @@index([orderId])
   @@index([listingId])
+}
+
+// =========================================================
+// Category (managed replacement for free-text productType)
+// =========================================================
+
+model Category {
+  id                String  @id @default(cuid())
+  name              String  @unique
+  shopifyCategoryId String? // Shopify Standard Product Taxonomy GID (gid://shopify/TaxonomyCategory/...)
+  position          Int     @default(0)
+
+  cards     Card[]
+  templates Template[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+enum TemplateKind {
+  TITLE
+  DESCRIPTION
+  SKU
+}
+
+// A Template is (category × channel × kind) → body. channel=null is the default
+// that applies to any channel without an override. Bodies use {Token} syntax
+// resolved at push time via src/lib/templates/render.ts.
+model Template {
+  id         String       @id @default(cuid())
+  categoryId String
+  category   Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  channel    Channel? // null = default for all channels (unless overridden)
+  kind       TemplateKind
+  body       String       @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Composite uniqueness: one default (channel=null) + optional per-channel overrides per kind.
+  // Postgres treats NULLs as distinct so multi-null rows are technically allowed;
+  // enforced in app layer instead.
+  @@index([categoryId, channel, kind])
+}
+
+// =========================================================
+// Pricing profiles + rules (per-channel adjustments)
+// =========================================================
+
+model PricingProfile {
+  id              String  @id @default(cuid())
+  name            String  @unique
+  isDefault       Boolean @default(false)
+  minOfferEnabled Boolean @default(false)
+  minOfferPercent Int     @default(0) // negative: e.g. -15 = 85% floor for offers (eBay-side, not consumed yet)
+
+  cards Card[]
+  rules PricingProfileRule[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+model PricingProfileRule {
+  id                  String         @id @default(cuid())
+  profileId           String
+  profile             PricingProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  channel             Channel
+  priceAdjustPercent  Int            @default(0) // e.g. +15 = list at 115% on that channel
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([profileId, channel])
 }
