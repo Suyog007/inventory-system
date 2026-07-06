@@ -110,10 +110,17 @@ export async function createProfile(
       })
     : null;
 
+  // First-run bootstrap: if no active profile exists yet, the one being
+  // created becomes the system default so the outbox has something to fall
+  // back on and the pricing rules table gets a home.
+  const activeCount = await db.pricingProfile.count({
+    where: { deletedAt: null },
+  });
+
   const profile = await db.pricingProfile.create({
     data: {
       name: parsed.data.name,
-      isDefault: false,
+      isDefault: activeCount === 0,
       minOfferEnabled: cloneFrom?.minOfferEnabled ?? false,
       minOfferPercent: cloneFrom?.minOfferPercent ?? 0,
     },

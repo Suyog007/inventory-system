@@ -8,13 +8,12 @@ import {
   Handshake,
   Trash2,
   Sparkles,
-  Info,
 } from "lucide-react";
 import MinOfferForm from "./min-offer-form";
 import RulesForm from "./rules-form";
 import NewProfileForm from "./new-profile-form";
 import { deleteProfile } from "./actions";
-import { Alert, Badge, PageHeader, SectionCard } from "@/lib/ui";
+import { Badge, PageHeader, SectionCard } from "@/lib/ui";
 
 interface PageProps {
   searchParams: Promise<{ profile?: string }>;
@@ -43,10 +42,32 @@ export default async function PricingPage({ searchParams }: PageProps) {
 
   if (profiles.length === 0) {
     return (
-      <Alert variant="warning" icon={Info}>
-        No pricing profiles yet. Run <code>npm run db:seed</code> to bootstrap
-        the default profile.
-      </Alert>
+      <div className="space-y-6 max-w-3xl">
+        <PageHeader
+          icon={DollarSign}
+          title="Pricing"
+          subtitle="Per-channel pricing rules and named profiles applied at push time."
+        />
+
+        <SectionCard>
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-semibold text-gray-900">
+                Create your first pricing profile
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                A profile is a bundle of per-channel price adjustments. Your
+                first one becomes the system default — every card gets assigned
+                to it automatically. You can add more later.
+              </p>
+            </div>
+          </div>
+          <NewProfileForm profiles={[]} />
+        </SectionCard>
+      </div>
     );
   }
 
