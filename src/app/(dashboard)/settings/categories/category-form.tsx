@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import {
   createCategory,
@@ -8,6 +8,7 @@ import {
   type CategoryActionResult,
 } from "./actions";
 import ShopifyCategoryPicker from "./shopify-category-picker";
+import { Alert, buttonClass } from "@/lib/ui";
 
 interface Props {
   category?: {
@@ -21,17 +22,14 @@ interface Props {
 function SubmitButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50"
-    >
+    <button type="submit" disabled={pending} className={buttonClass("primary")}>
       {pending ? "Saving..." : label}
     </button>
   );
 }
 
 export default function CategoryForm({ category }: Props) {
+  const isEdit = Boolean(category);
   const boundAction = category
     ? updateCategory.bind(null, category.id)
     : createCategory;
@@ -40,14 +38,27 @@ export default function CategoryForm({ category }: Props) {
     undefined,
   );
 
+  const formRef = useRef<HTMLFormElement>(null);
+  // Bumping this remounts the ShopifyCategoryPicker so its internal state
+  // (selected GID + label) clears alongside the plain inputs. Only used in
+  // create mode — edits should keep the picker's selection after save.
+  const [pickerVersion, setPickerVersion] = useState(0);
+
+  useEffect(() => {
+    if (!isEdit && result && "success" in result) {
+      formRef.current?.reset();
+      setPickerVersion((n) => n + 1);
+    }
+  }, [result, isEdit]);
+
   const inputClass =
-    "w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition";
 
   return (
-    <form action={formAction} className="space-y-3">
+    <form ref={formRef} action={formAction} className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <label className="block">
-          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
             Name <span className="text-red-600">*</span>
           </span>
           <input
@@ -58,16 +69,17 @@ export default function CategoryForm({ category }: Props) {
           />
         </label>
         <label className="block">
-          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
             Shopify Category
           </span>
           <ShopifyCategoryPicker
+            key={pickerVersion}
             name="shopifyCategoryId"
             defaultValue={category?.shopifyCategoryId ?? ""}
           />
         </label>
         <label className="block">
-          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
             Sort position
           </span>
           <input
@@ -81,14 +93,10 @@ export default function CategoryForm({ category }: Props) {
       </div>
 
       {result && "error" in result && (
-        <div className="bg-red-50 border border-red-200 text-red-800 p-2 rounded text-sm">
-          {result.error}
-        </div>
+        <Alert variant="error">{result.error}</Alert>
       )}
       {result && "success" in result && (
-        <div className="bg-green-50 border border-green-200 text-green-800 p-2 rounded text-sm">
-          {result.success}
-        </div>
+        <Alert variant="success">{result.success}</Alert>
       )}
 
       <SubmitButton label={category ? "Save changes" : "Add category"} />
