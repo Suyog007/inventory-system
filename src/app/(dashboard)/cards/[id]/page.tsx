@@ -1,17 +1,16 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import {
   LISTING_STATUS_STYLES,
   formatGraderGrade,
   formatPrice,
 } from "@/lib/format";
 import DeleteCardButton from "./delete-button";
+import ImageGallery from "./image-gallery";
 import {
   ArrowLeft,
   Pencil,
-  ImageIcon,
   Award,
   Package,
   Radio,
@@ -67,7 +66,6 @@ export default async function CardDetailPage({
 
   if (!card || card.deletedAt) notFound();
 
-  const hero = card.images[0];
   const variant = card.variants[0];
   const listings = card.variants.flatMap((v) => v.listings);
   const listingsCount = listings.length;
@@ -153,42 +151,7 @@ export default async function CardDetailPage({
         {/* LEFT — image + quick stats */}
         <div className="space-y-6">
           <SectionCard padding="p-4">
-            <div className="aspect-[3/4] rounded-xl overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 relative">
-              {hero ? (
-                <Image
-                  src={hero.url}
-                  alt={hero.altText ?? card.title}
-                  fill
-                  sizes="(max-width: 1024px) 100vw, 33vw"
-                  className="object-contain"
-                  unoptimized
-                />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                  <ImageIcon className="w-10 h-10" />
-                  <span className="text-xs">No image</span>
-                </div>
-              )}
-            </div>
-            {card.images.length > 1 && (
-              <div className="mt-3 grid grid-cols-5 gap-2">
-                {card.images.slice(1, 6).map((img) => (
-                  <div
-                    key={img.id}
-                    className="aspect-square rounded-lg overflow-hidden bg-gray-100 relative"
-                  >
-                    <Image
-                      src={img.url}
-                      alt={img.altText ?? ""}
-                      fill
-                      sizes="80px"
-                      className="object-cover"
-                      unoptimized
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+            <ImageGallery images={card.images} title={card.title} />
           </SectionCard>
 
           <SectionCard title="Snapshot">
