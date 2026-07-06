@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Trash2, Check, X } from "lucide-react";
 import { deleteCard } from "../actions";
+import { buttonClass } from "@/lib/ui";
 
 export default function DeleteCardButton({ cardId }: { cardId: string }) {
   const [confirming, setConfirming] = useState(false);
@@ -11,27 +13,30 @@ export default function DeleteCardButton({ cardId }: { cardId: string }) {
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="text-red-600 hover:underline text-sm"
+        className={buttonClass("secondary")}
       >
-        Delete card
+        <Trash2 className="w-4 h-4 text-rose-500" />
+        Delete
       </button>
     );
   }
 
   return (
-    <form action={deleteCard.bind(null, cardId)} className="flex items-center gap-2">
-      <span className="text-sm text-red-700">Delete this card?</span>
-      <button
-        type="submit"
-        className="bg-red-600 text-white px-3 py-1 rounded text-sm font-medium hover:bg-red-700"
-      >
-        Yes, delete
+    <form
+      action={deleteCard.bind(null, cardId)}
+      className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5"
+    >
+      <span className="text-sm text-rose-800 font-medium">Delete this card?</span>
+      <button type="submit" className={buttonClass("danger", "sm")}>
+        <Check className="w-3.5 h-3.5" />
+        Yes
       </button>
       <button
         type="button"
         onClick={() => setConfirming(false)}
-        className="text-gray-600 hover:underline text-sm"
+        className={buttonClass("ghost", "sm")}
       >
+        <X className="w-3.5 h-3.5" />
         Cancel
       </button>
     </form>
