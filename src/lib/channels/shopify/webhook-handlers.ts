@@ -54,56 +54,19 @@ async function handleProductDelete(
   if (id == null) return;
   const productGid = `gid://shopify/Product/${id}`;
 
-  // Find affected listings BEFORE soft-deleting so we can cascade up to Variant/Card.
-  const affectedListings = await db.listing.findMany({
+  // Only unlist on THIS channel. The Card + Variant stay as inventory records
+  // so the user can re-list them on Shopify (or any other channel) later.
+  // If the merchant sold the card through Shopify checkout, the orders/create
+  // webhook records the sale + decrements Variant.quantity before this fires
+  // — inventory is still the right place for it.
+  await db.listing.updateMany({
     where: {
       channelConnectionId: connectionId,
       externalParentId: productGid,
       deletedAt: null,
     },
-    include: { variant: { include: { listings: true } } },
+    data: { deletedAt: new Date(), status: "DELISTED" },
   });
-  if (affectedListings.length === 0) return;
-
-  const now = new Date();
-
-  // Soft-delete the listings on this channel
-  await db.listing.updateMany({
-    where: { id: { in: affectedListings.map((l) => l.id) } },
-    data: { deletedAt: now, status: "DELISTED" },
-  });
-
-  // For each affected variant: if it has no OTHER active listings on any channel,
-  // soft-delete the variant. If the variant's card has no other active variants,
-  // soft-delete the card too.
-  // (Multi-channel ready: a card listed on both Shopify + eBay won't cascade
-  // when only Shopify deletes — the eBay listing keeps the variant+card alive.)
-  const affectedVariantIds = [...new Set(affectedListings.map((l) => l.variantId))];
-  for (const vId of affectedVariantIds) {
-    const otherActive = await db.listing.count({
-      where: {
-        variantId: vId,
-        deletedAt: null,
-        id: { notIn: affectedListings.map((l) => l.id) },
-      },
-    });
-    if (otherActive > 0) continue;
-
-    const variant = await db.variant.update({
-      where: { id: vId },
-      data: { deletedAt: now },
-    });
-
-    const remainingActive = await db.variant.count({
-      where: { cardId: variant.cardId, deletedAt: null },
-    });
-    if (remainingActive === 0) {
-      await db.card.update({
-        where: { id: variant.cardId },
-        data: { deletedAt: now },
-      });
-    }
-  }
 }
 
 async function handleOrderCreate(
