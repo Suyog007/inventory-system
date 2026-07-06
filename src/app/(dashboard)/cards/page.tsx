@@ -223,8 +223,21 @@ function CardsGrid({ cards }: { cards: CardRow[] }) {
                 </div>
               )}
               <div className="mt-auto pt-3 flex items-end justify-between">
-                <div className="text-base font-bold text-gray-900">
-                  {formatPrice(price)}
+                <div>
+                  <div className="text-base font-bold text-gray-900 flex items-baseline gap-1.5">
+                    {formatPrice(price)}
+                    {variant && variant.quantity > 1 && (
+                      <span className="text-xs font-semibold text-amber-700 bg-amber-100 rounded px-1.5 py-0.5">
+                        × {variant.quantity}
+                      </span>
+                    )}
+                  </div>
+                  {variant && variant.quantity > 1 && (
+                    <div className="text-[10px] text-gray-500 mt-0.5">
+                      {formatPrice(Number(price?.toString() ?? 0) * variant.quantity)}{" "}
+                      total
+                    </div>
+                  )}
                 </div>
                 {listings.length === 0 ? (
                   <Badge variant="neutral">inventory</Badge>
@@ -263,6 +276,7 @@ function CardsTable({ cards }: { cards: CardRow[] }) {
             <th className="p-3">Category</th>
             <th className="p-3">Grade</th>
             <th className="p-3">SKU</th>
+            <th className="p-3">Qty</th>
             <th className="p-3">Price</th>
             <th className="p-3">Channels</th>
           </tr>
@@ -321,8 +335,27 @@ function CardsTable({ cards }: { cards: CardRow[] }) {
                 <td className="p-3 text-sm font-mono text-gray-700">
                   {variant?.sku ?? "—"}
                 </td>
+                <td className="p-3 text-sm">
+                  {variant ? (
+                    variant.quantity > 1 ? (
+                      <Badge variant="warning">× {variant.quantity}</Badge>
+                    ) : (
+                      <span className="text-gray-700">{variant.quantity}</span>
+                    )
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
+                </td>
                 <td className="p-3 text-sm font-semibold text-gray-900">
                   {formatPrice(variant?.listingPrice)}
+                  {variant && variant.quantity > 1 && (
+                    <div className="text-[10px] text-gray-500 font-normal">
+                      {formatPrice(
+                        Number(variant.listingPrice.toString()) * variant.quantity,
+                      )}{" "}
+                      total
+                    </div>
+                  )}
                 </td>
                 <td className="p-3">
                   {listings.length === 0 ? (
