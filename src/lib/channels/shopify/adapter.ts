@@ -240,8 +240,13 @@ export class ShopifyAdapter implements ChannelAdapter {
       inventoryItemId = firstVariant.inventoryItem.id;
     }
 
-    // Update variant SKU + price + enable inventory tracking.
+    // Update variant SKU + price + cost + enable inventory tracking.
     // We always set tracked:true so Shopify shows real qty instead of "not tracked".
+    const inventoryItem: Record<string, unknown> = { tracked: true };
+    if (input.variant.sku !== undefined) inventoryItem.sku = input.variant.sku;
+    if (input.variant.cost !== undefined) {
+      inventoryItem.cost = input.variant.cost.toFixed(2);
+    }
     const variantData = await client.graphql<{
       productVariantsBulkUpdate: {
         productVariants: Array<{
@@ -256,10 +261,7 @@ export class ShopifyAdapter implements ChannelAdapter {
         {
           id: variantGid,
           price: input.variant.price.toFixed(2),
-          inventoryItem: {
-            tracked: true,
-            ...(input.variant.sku !== undefined ? { sku: input.variant.sku } : {}),
-          },
+          inventoryItem,
         },
       ],
     });

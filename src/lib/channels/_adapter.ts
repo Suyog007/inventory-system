@@ -56,6 +56,9 @@ export interface ChannelUpsertInput {
     sku?: string;
     price: number;
     quantity: number;
+    // Cost-of-goods per unit. Optional — adapters that don't expose a cost
+    // field on their platform (most auction marketplaces) can ignore this.
+    cost?: number;
   };
   // Image URLs to attach to the listing. Channel fetches each URL and hosts a copy.
   // Currently pushed only on CREATE; update-side image management is deferred.

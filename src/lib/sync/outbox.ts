@@ -14,6 +14,13 @@
 import { db } from "@/lib/db";
 import { getAdapterForConnection } from "@/lib/channels";
 import type { ChannelUpsertInput } from "@/lib/channels/_adapter";
+import { findTemplate } from "@/lib/templates/resolver";
+import {
+  renderText,
+  renderHtml,
+  resolveTokenValues,
+} from "@/lib/templates/render";
+import { computeChannelPrice } from "@/lib/pricing/compute";
 
 const MAX_ATTEMPTS = 10;
 
@@ -71,6 +78,8 @@ export async function processItem(itemId: string): Promise<void> {
               include: {
                 card: {
                   include: {
+                    category: true,
+                    pricingProfile: { include: { rules: true } },
                     cardTags: { include: { tag: true } },
                     images: { orderBy: { position: "asc" } },
                   },
@@ -93,25 +102,84 @@ export async function processItem(itemId: string): Promise<void> {
           );
         }
 
+        // Prefer templates from the card's Category; per-listing overrides win
+        // when useXTemplate is off. Existing rows had their flags flipped to
+        // false during migration, so their stored title/description carries over
+        // as an override — they push identically until the user opts back in.
+        const card = listing.variant.card;
+        const channel = item.channelConnection.channel;
+        const tokens = resolveTokenValues(card, listing.variant);
+
+        const title = await resolveField({
+          useTemplate: listing.useTitleTemplate,
+          override: listing.titleOverride,
+          fallback: card.title,
+          kind: "TITLE",
+          categoryId: card.categoryId,
+          channel,
+          tokens,
+          html: false,
+        });
+
+        const descriptionHtml = await resolveField({
+          useTemplate: listing.useDescriptionTemplate,
+          override: listing.descriptionHtmlOverride,
+          fallback: card.descriptionHtml ?? "",
+          kind: "DESCRIPTION",
+          categoryId: card.categoryId,
+          channel,
+          tokens,
+          html: true,
+        });
+
+        // SKU auto-rule: graded cards with a cert# default to the cert as SKU
+        // when there's no explicit override and no meaningful SKU template value.
+        const rawSku = await resolveField({
+          useTemplate: listing.useSkuTemplate,
+          override: listing.skuOverride,
+          fallback: listing.variant.sku ?? "",
+          kind: "SKU",
+          categoryId: card.categoryId,
+          channel,
+          tokens,
+          html: false,
+        });
+        const sku =
+          rawSku ||
+          (card.grader && card.certNumber ? card.certNumber : undefined) ||
+          undefined;
+
+        // Per-channel price: canonical listingPrice × (1 + this channel's %).
+        // Also written back to Listing.price so the dashboard reflects the
+        // actual pushed value (audit trail + Phase 3 sidebar preview).
+        const basePrice = Number(listing.variant.listingPrice.toString());
+        const channelPrice = card.pricingProfile
+          ? computeChannelPrice(basePrice, card.pricingProfile.rules, channel)
+          : basePrice;
+
         const input: ChannelUpsertInput = {
-          title: listing.variant.card.title,
-          descriptionHtml: listing.variant.card.descriptionHtml ?? undefined,
-          vendor: listing.variant.card.vendor ?? undefined,
-          productType: listing.variant.card.productType ?? undefined,
-          tags: listing.variant.card.cardTags.map((ct) => ct.tag.name),
-          status: listing.status === "ACTIVE" || listing.status === "DRAFT" || listing.status === "ARCHIVED"
-            ? listing.status
-            : "ACTIVE",
+          title,
+          descriptionHtml: descriptionHtml || undefined,
+          vendor: card.vendor ?? undefined,
+          productType: card.category?.name ?? card.productType ?? undefined,
+          tags: card.cardTags.map((ct) => ct.tag.name),
+          // Status stays ACTIVE by default; Shopify adapter publishes on create.
+          status: "ACTIVE",
           variant: {
-            sku: listing.variant.sku ?? undefined,
-            price: Number(listing.price.toString()),
+            sku,
+            price: channelPrice,
             quantity: listing.variant.quantity,
+            cost:
+              listing.variant.itemCost != null
+                ? Number(listing.variant.itemCost.toString())
+                : undefined,
           },
-          images: listing.variant.card.images.map((img) => ({
+          images: card.images.map((img) => ({
             url: img.url,
             altText: img.altText ?? undefined,
           })),
-          categoryId: listing.variant.card.shopifyCategoryId ?? undefined,
+          categoryId:
+            card.category?.shopifyCategoryId ?? card.shopifyCategoryId ?? undefined,
           externalId:
             item.operation === "UPDATE_LISTING" ? listing.externalId : undefined,
           externalParentId:
@@ -122,6 +190,16 @@ export async function processItem(itemId: string): Promise<void> {
 
         const result = await adapter.pushUpsert(input);
 
+        // Write the pushed SKU back so the UI reflects what actually landed on
+        // the channel. Without this, template-rendered SKUs (e.g. cert# for
+        // graded cards) show in Shopify but stay blank in our dashboard.
+        if (sku && sku !== listing.variant.sku) {
+          await db.variant.update({
+            where: { id: listing.variantId },
+            data: { sku },
+          });
+        }
+
         // For CREATE, store the new external IDs returned by the channel
         if (item.operation === "CREATE_LISTING") {
           await db.listing.update({
@@ -130,13 +208,14 @@ export async function processItem(itemId: string): Promise<void> {
               externalId: result.externalId,
               externalParentId: result.externalParentId ?? null,
               externalUrl: result.externalUrl ?? null,
+              price: channelPrice,
               lastSyncedAt: new Date(),
             },
           });
         } else {
           await db.listing.update({
             where: { id: listingId },
-            data: { lastSyncedAt: new Date() },
+            data: { price: channelPrice, lastSyncedAt: new Date() },
           });
         }
         break;
@@ -216,4 +295,30 @@ export async function processItem(itemId: string): Promise<void> {
  */
 export async function flushOutboxNow(limit = 5): Promise<number> {
   return processNextBatch(limit);
+}
+
+// Resolves a single templated field (title / description / SKU) for a listing.
+// Precedence: override > category template > fallback string.
+async function resolveField(opts: {
+  useTemplate: boolean;
+  override: string | null;
+  fallback: string;
+  kind: "TITLE" | "DESCRIPTION" | "SKU";
+  categoryId: string | null;
+  channel: Parameters<typeof findTemplate>[0]["channel"];
+  tokens: Record<string, string>;
+  html: boolean;
+}): Promise<string> {
+  if (!opts.useTemplate) {
+    return opts.override ?? opts.fallback;
+  }
+  const body = await findTemplate({
+    categoryId: opts.categoryId,
+    channel: opts.channel,
+    kind: opts.kind,
+  });
+  if (!body) return opts.fallback;
+  return opts.html
+    ? renderHtml(body, opts.tokens)
+    : renderText(body, opts.tokens);
 }

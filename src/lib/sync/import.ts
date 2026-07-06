@@ -130,12 +130,32 @@ async function upsertSnapshot(
   // Pull tags into Tag/CardTag (drop existing first for idempotency)
   const tagNames = snapshot.tags.filter((t) => t.trim().length > 0);
 
+  // Best-effort category match by name; defaults get seeded, so most existing
+  // productType values ("Sports Cards", "TCG/CCG", etc.) resolve cleanly.
+  let categoryId: string | null = null;
+  if (snapshot.productType) {
+    const category = await db.category.findFirst({
+      where: {
+        deletedAt: null,
+        name: { equals: snapshot.productType, mode: "insensitive" },
+      },
+    });
+    categoryId = category?.id ?? null;
+  }
+
+  // Every card in this app should have a pricing profile; default to the system default.
+  const defaultProfile = await db.pricingProfile.findFirst({
+    where: { isDefault: true, deletedAt: null },
+  });
+
   const cardData = {
     title: snapshot.title,
     descriptionHtml: snapshot.descriptionHtml ?? null,
     vendor: snapshot.vendor ?? null,
-    productType: snapshot.productType ?? null,
-    shopifyCategoryId: snapshot.categoryId ?? null,
+    productType: snapshot.productType ?? null, // legacy fallback for outbox pushes
+    shopifyCategoryId: snapshot.categoryId ?? null, // legacy fallback
+    categoryId,
+    pricingProfileId: defaultProfile?.id ?? null,
     status: mapCardStatus(snapshot.status),
     parseSource: parsed.parseSource,
     player: parsed.fields.player ?? null,
@@ -192,6 +212,10 @@ async function upsertSnapshot(
           sku: v.sku ?? null,
           quantity: v.quantity,
           position: v.position,
+          // First imported price becomes the canonical listingPrice if none set yet.
+          ...(existing.variant.listingPrice.toString() === "0"
+            ? { listingPrice: v.price }
+            : {}),
           deletedAt: null,
         },
       });
@@ -203,6 +227,7 @@ async function upsertSnapshot(
           sku: v.sku ?? null,
           quantity: v.quantity,
           position: v.position,
+          listingPrice: v.price,
         },
       });
       variantId = variant.id;
