@@ -39,13 +39,19 @@ export default async function DashboardPage() {
     categoryCounts,
   ] = await Promise.all([
     db.card.count({ where: { deletedAt: null } }),
+    // Inventory value = what the user OWNS, regardless of listing state.
+    // Inventory-only cards + DRAFT / ARCHIVED / DELISTED listings all still
+    // represent real inventory, so we sum from Variant, not Listing.
     db.$queryRaw<Array<{ total: string | null }>>`
-      SELECT COALESCE(SUM(l.price * v.quantity), 0)::text AS total
-      FROM "Listing" l
-      JOIN "Variant" v ON v.id = l."variantId"
-      WHERE l."deletedAt" IS NULL AND l.status = 'ACTIVE'
+      SELECT COALESCE(SUM(v."listingPrice" * v.quantity), 0)::text AS total
+      FROM "Variant" v
+      JOIN "Card" c ON c.id = v."cardId"
+      WHERE v."deletedAt" IS NULL AND c."deletedAt" IS NULL
     `,
-    db.listing.count({ where: { deletedAt: null, status: "ACTIVE" } }),
+    // "Live listings" = any Listing row not soft-deleted (matches the Sales
+    // Channels sidebar's live state). Keeps the dashboard number consistent
+    // with the SHOPIFY badges on the cards page.
+    db.listing.count({ where: { deletedAt: null } }),
     db.channelConnection.findMany({
       where: {
         deletedAt: null,
@@ -116,7 +122,7 @@ export default async function DashboardPage() {
           href="/cards"
         />
         <KpiCard
-          label="Active listings"
+          label="Live listings"
           value={activeListings.toLocaleString()}
           icon={Radio}
           tone="emerald"
