@@ -20,6 +20,11 @@ export default function ImageDropZone({
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
+  // Independent state for the paste textarea so Enter / newlines behave
+  // normally. Users click "Add URLs" (or blur) to move valid entries into
+  // the image grid.
+  const [pasteText, setPasteText] = useState("");
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
@@ -81,6 +86,33 @@ export default function ImageDropZone({
     });
   }
 
+  // Parse pasteText into valid HTTP(S) URLs, add to grid, and clear the box.
+  function commitPastedUrls() {
+    const lines = pasteText.split(/\r?\n/).map((u) => u.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      setPasteText("");
+      setPasteError(null);
+      return;
+    }
+    const good: string[] = [];
+    const bad: string[] = [];
+    for (const line of lines) {
+      if (/^https?:\/\//i.test(line)) good.push(line);
+      else bad.push(line);
+    }
+    if (good.length > 0) {
+      setUrls((u) => [...u, ...good.filter((v) => !u.includes(v))]);
+    }
+    if (bad.length > 0) {
+      setPasteError(
+        `${bad.length} line${bad.length === 1 ? "" : "s"} skipped — must start with http:// or https://`,
+      );
+    } else {
+      setPasteError(null);
+    }
+    setPasteText("");
+  }
+
   return (
     <div>
       {/* Hidden field that submits with the form — actions.ts splits on newlines */}
@@ -93,8 +125,10 @@ export default function ImageDropZone({
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={`border-2 border-dashed rounded p-6 text-center cursor-pointer transition ${
-          dragging ? "border-blue-500 bg-blue-50" : "border-gray-300 bg-gray-50 hover:bg-gray-100"
+        className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition ${
+          dragging
+            ? "border-blue-500 bg-blue-50"
+            : "border-gray-300 bg-gray-50 hover:bg-gray-100"
         }`}
         onClick={() => inputRef.current?.click()}
       >
@@ -184,20 +218,44 @@ export default function ImageDropZone({
         {showPaste ? "Hide URL paste" : "Or paste URLs"}
       </button>
       {showPaste && (
-        <textarea
-          value={urls.join("\n")}
-          onChange={(e) =>
-            setUrls(
-              e.target.value
-                .split(/\r?\n/)
-                .map((u) => u.trim())
-                .filter(Boolean),
-            )
-          }
-          rows={3}
-          placeholder={"https://example.com/front.jpg\nhttps://example.com/back.jpg"}
-          className="w-full p-2 border border-gray-300 rounded text-xs font-mono mt-2"
-        />
+        <div className="mt-2 space-y-2">
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            onKeyDown={(e) => {
+              // Ctrl/Cmd + Enter to commit; plain Enter still adds a newline.
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                commitPastedUrls();
+              }
+            }}
+            rows={3}
+            placeholder={"https://example.com/front.jpg\nhttps://example.com/back.jpg"}
+            className="w-full p-2 border border-gray-300 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] text-gray-500">
+              One URL per line. Press{" "}
+              <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px]">
+                ⌘/Ctrl + Enter
+              </kbd>{" "}
+              to add.
+            </p>
+            <button
+              type="button"
+              onClick={commitPastedUrls}
+              disabled={pasteText.trim().length === 0}
+              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              Add URLs
+            </button>
+          </div>
+          {pasteError && (
+            <p className="text-xs text-amber-700" role="alert">
+              {pasteError}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
