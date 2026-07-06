@@ -57,6 +57,18 @@ export default async function DashboardLayout({
               >
                 Channels
               </Link>
+              <Link
+                href="/settings/categories"
+                className="block py-2 px-3 rounded hover:bg-gray-800 text-sm"
+              >
+                Categories
+              </Link>
+              <Link
+                href="/settings/pricing"
+                className="block py-2 px-3 rounded hover:bg-gray-800 text-sm"
+              >
+                Pricing
+              </Link>
             </>
           )}
         </div>
