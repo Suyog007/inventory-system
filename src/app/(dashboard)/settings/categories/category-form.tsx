@@ -15,7 +15,6 @@ interface Props {
     id: string;
     name: string;
     shopifyCategoryId: string | null;
-    position: number;
   };
 }
 
@@ -56,7 +55,7 @@ export default function CategoryForm({ category }: Props) {
 
   return (
     <form ref={formRef} action={formAction} className="space-y-3">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label className="block">
           <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
             Name <span className="text-red-600">*</span>
@@ -76,18 +75,6 @@ export default function CategoryForm({ category }: Props) {
             key={pickerVersion}
             name="shopifyCategoryId"
             defaultValue={category?.shopifyCategoryId ?? ""}
-          />
-        </label>
-        <label className="block">
-          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
-            Sort position
-          </span>
-          <input
-            name="position"
-            type="number"
-            min="0"
-            defaultValue={category?.position ?? 0}
-            className={inputClass}
           />
         </label>
       </div>

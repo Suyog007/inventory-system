@@ -13,14 +13,12 @@ const prisma = new PrismaClient({
 
 const DEFAULT_CATEGORIES: Array<{
   name: string;
-  position: number;
   titleTemplate: string;
   descriptionTemplate: string;
   skuTemplate: string;
 }> = [
   {
     name: "Sports Cards",
-    position: 0,
     titleTemplate:
       "{Year} {Manufacturer} {Set} {Player} #{CardNumber} {Parallel} {Grader} {Grade}",
     descriptionTemplate:
@@ -42,7 +40,6 @@ const DEFAULT_CATEGORIES: Array<{
   },
   {
     name: "TCG/CCG",
-    position: 1,
     titleTemplate:
       "{Year} {Game} {Set} {Player} #{CardNumber} {Rarity} {Grader} {Grade}",
     descriptionTemplate:
@@ -61,7 +58,6 @@ const DEFAULT_CATEGORIES: Array<{
   },
   {
     name: "Sealed Boxes",
-    position: 2,
     titleTemplate: "{Year} {Manufacturer} {Set} {Parallel} Sealed Box",
     descriptionTemplate:
       "<p>Factory sealed {Year} {Manufacturer} {Set} {Parallel} box.</p>" +
@@ -70,7 +66,6 @@ const DEFAULT_CATEGORIES: Array<{
   },
   {
     name: "Comics",
-    position: 3,
     titleTemplate: "{Year} {Manufacturer} {Set} #{CardNumber} {Grader} {Grade}",
     descriptionTemplate:
       "<p>{Year} {Manufacturer} {Set} #{CardNumber} {Grader} {Grade}.</p>" +
@@ -79,7 +74,6 @@ const DEFAULT_CATEGORIES: Array<{
   },
   {
     name: "Non-Sports Cards",
-    position: 4,
     titleTemplate:
       "{Year} {Manufacturer} {Set} {Player} #{CardNumber} {Grader} {Grade}",
     descriptionTemplate:
@@ -89,7 +83,6 @@ const DEFAULT_CATEGORIES: Array<{
   },
   {
     name: "Legacy",
-    position: 99,
     titleTemplate: "{Title}",
     descriptionTemplate: "{DescriptionHtml}",
     skuTemplate: "",
@@ -121,7 +114,7 @@ async function seedCategoriesAndTemplates() {
   for (const cat of DEFAULT_CATEGORIES) {
     const category = await prisma.category.upsert({
       where: { name: cat.name },
-      create: { name: cat.name, position: cat.position },
+      create: { name: cat.name },
       update: {},
     });
 

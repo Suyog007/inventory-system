@@ -44,7 +44,7 @@ export default async function NewCardPage() {
     }),
     db.category.findMany({
       where: { deletedAt: null },
-      orderBy: [{ position: "asc" }, { name: "asc" }],
+      orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     db.pricingProfile.findMany({

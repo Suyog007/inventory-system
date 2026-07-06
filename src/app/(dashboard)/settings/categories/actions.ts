@@ -8,7 +8,6 @@ import { revalidatePath } from "next/cache";
 const categorySchema = z.object({
   name: z.string().min(1, "Name is required"),
   shopifyCategoryId: z.string().optional(),
-  position: z.string().optional(),
 });
 
 export type CategoryActionResult =
@@ -41,7 +40,6 @@ export async function createCategory(
       data: {
         deletedAt: null,
         shopifyCategoryId: parsed.data.shopifyCategoryId?.trim() || null,
-        position: parsed.data.position ? Number(parsed.data.position) : 0,
       },
     });
   } else {
@@ -49,7 +47,6 @@ export async function createCategory(
       data: {
         name: parsed.data.name,
         shopifyCategoryId: parsed.data.shopifyCategoryId?.trim() || null,
-        position: parsed.data.position ? Number(parsed.data.position) : 0,
       },
     });
   }
@@ -76,7 +73,6 @@ export async function updateCategory(
     data: {
       name: parsed.data.name,
       shopifyCategoryId: parsed.data.shopifyCategoryId?.trim() || null,
-      position: parsed.data.position ? Number(parsed.data.position) : 0,
     },
   });
 

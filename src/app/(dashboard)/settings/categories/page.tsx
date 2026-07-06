@@ -6,13 +6,12 @@ import {
   Tags,
   FileCode2,
   Pencil,
-  Trash2,
   Plus,
   CheckCircle2,
   CircleDashed,
 } from "lucide-react";
 import CategoryForm from "./category-form";
-import { deleteCategory } from "./actions";
+import RemoveCategoryButton from "./remove-category-button";
 import { Badge, PageHeader, SectionCard } from "@/lib/ui";
 
 export default async function CategoriesPage() {
@@ -21,7 +20,7 @@ export default async function CategoriesPage() {
 
   const categories = await db.category.findMany({
     where: { deletedAt: null },
-    orderBy: [{ position: "asc" }, { name: "asc" }],
+    orderBy: { name: "asc" },
     include: {
       _count: { select: { cards: true } },
     },
@@ -87,27 +86,22 @@ export default async function CategoriesPage() {
                   <div className="inline-flex items-center gap-3">
                     <Link
                       href={`/settings/categories/${c.id}/templates`}
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      className="group inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium transition"
                     >
-                      <FileCode2 className="w-3.5 h-3.5" />
+                      <FileCode2 className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
                       Templates
                     </Link>
                     <Link
                       href={`/settings/categories/${c.id}`}
-                      className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 font-medium"
+                      className="group inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 font-medium transition"
                     >
-                      <Pencil className="w-3.5 h-3.5" />
+                      <Pencil className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
                       Edit
                     </Link>
-                    <form action={deleteCategory.bind(null, c.id)}>
-                      <button
-                        type="submit"
-                        className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 font-medium"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Remove
-                      </button>
-                    </form>
+                    <RemoveCategoryButton
+                      categoryId={c.id}
+                      categoryName={c.name}
+                    />
                   </div>
                 </td>
               </tr>

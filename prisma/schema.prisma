@@ -423,7 +423,6 @@ model Category {
   id                String  @id @default(cuid())
   name              String  @unique
   shopifyCategoryId String? // Shopify Standard Product Taxonomy GID (gid://shopify/TaxonomyCategory/...)
-  position          Int     @default(0)
 
   cards     Card[]
   templates Template[]
