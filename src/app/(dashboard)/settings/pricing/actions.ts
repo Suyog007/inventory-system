@@ -117,24 +117,45 @@ export async function createProfile(
     where: { deletedAt: null },
   });
 
-  const profile = await db.pricingProfile.create({
-    data: {
-      name: parsed.data.name,
-      isDefault: activeCount === 0,
-      minOfferEnabled: cloneFrom?.minOfferEnabled ?? false,
-      minOfferPercent: cloneFrom?.minOfferPercent ?? 0,
-    },
-  });
+  let profile;
+  if (existing?.deletedAt) {
+    // A soft-deleted row still holds the unique name. Restore it in place
+    // instead of failing on the unique constraint.
+    profile = await db.pricingProfile.update({
+      where: { id: existing.id },
+      data: {
+        deletedAt: null,
+        isDefault: activeCount === 0,
+        minOfferEnabled: cloneFrom?.minOfferEnabled ?? existing.minOfferEnabled,
+        minOfferPercent: cloneFrom?.minOfferPercent ?? existing.minOfferPercent,
+      },
+    });
+  } else {
+    profile = await db.pricingProfile.create({
+      data: {
+        name: parsed.data.name,
+        isDefault: activeCount === 0,
+        minOfferEnabled: cloneFrom?.minOfferEnabled ?? false,
+        minOfferPercent: cloneFrom?.minOfferPercent ?? 0,
+      },
+    });
+  }
 
-  // Seed rules — either cloned or all-zero.
+  // Seed rules — either cloned or all-zero. Upsert so restored profiles
+  // pick up new clone-source values while keeping the row identity of any
+  // pre-existing rule attached to this profile id.
   for (const channel of Object.values(Channel)) {
     const source = cloneFrom?.rules.find((r) => r.channel === channel);
-    await db.pricingProfileRule.create({
-      data: {
+    await db.pricingProfileRule.upsert({
+      where: { profileId_channel: { profileId: profile.id, channel } },
+      create: {
         profileId: profile.id,
         channel,
         priceAdjustPercent: source?.priceAdjustPercent ?? 0,
       },
+      update: source
+        ? { priceAdjustPercent: source.priceAdjustPercent }
+        : {},
     });
   }
 
