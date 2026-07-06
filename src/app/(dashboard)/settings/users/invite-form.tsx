@@ -2,7 +2,9 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
+import { UserPlus } from "lucide-react";
 import { inviteUser, type InviteResult } from "./actions";
+import { Alert, buttonClass } from "@/lib/ui";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -10,8 +12,9 @@ function SubmitButton() {
     <button
       type="submit"
       disabled={pending}
-      className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+      className={buttonClass("primary")}
     >
+      <UserPlus className="w-4 h-4" />
       {pending ? "Inviting..." : "Invite user"}
     </button>
   );
@@ -30,56 +33,58 @@ export default function InviteUserForm() {
     }
   }, [result]);
 
+  const inputClass =
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition";
+
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-lg font-semibold mb-4">Invite a new user</h2>
-      <form
-        ref={formRef}
-        action={formAction}
-        className="space-y-3 max-w-md"
-      >
-        <input
-          name="name"
-          placeholder="Name"
-          required
-          className="w-full p-2 border border-gray-300 rounded"
-        />
+    <form ref={formRef} action={formAction} className="space-y-3 max-w-md">
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
+            Name
+          </span>
+          <input name="name" placeholder="Jane Doe" required className={inputClass} />
+        </label>
+        <label className="block">
+          <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
+            Role
+          </span>
+          <select name="role" required defaultValue="STAFF" className={inputClass}>
+            <option value="STAFF">Staff</option>
+            <option value="ADMIN">Admin</option>
+          </select>
+        </label>
+      </div>
+      <label className="block">
+        <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
+          Email
+        </span>
         <input
           name="email"
           type="email"
-          placeholder="Email"
+          placeholder="jane@example.com"
           required
-          className="w-full p-2 border border-gray-300 rounded"
+          className={inputClass}
         />
+      </label>
+      <label className="block">
+        <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-semibold">
+          Initial password
+        </span>
         <input
           name="password"
           type="text"
-          placeholder="Initial password (min 8 chars)"
+          placeholder="At least 8 characters"
           required
           minLength={8}
-          className="w-full p-2 border border-gray-300 rounded"
+          className={inputClass}
         />
-        <select
-          name="role"
-          required
-          defaultValue="STAFF"
-          className="w-full p-2 border border-gray-300 rounded bg-white"
-        >
-          <option value="STAFF">Staff</option>
-          <option value="ADMIN">Admin</option>
-        </select>
-        {result && "error" in result && (
-          <p className="text-red-600 text-sm" role="alert">
-            {result.error}
-          </p>
-        )}
-        {result && "success" in result && (
-          <p className="text-green-600 text-sm" role="status">
-            {result.success}
-          </p>
-        )}
-        <SubmitButton />
-      </form>
-    </div>
+      </label>
+      {result && "error" in result && <Alert variant="error">{result.error}</Alert>}
+      {result && "success" in result && (
+        <Alert variant="success">{result.success}</Alert>
+      )}
+      <SubmitButton />
+    </form>
   );
 }
